@@ -8,7 +8,7 @@ import signal
 import sys
 import logging
 
-from scraper import fetch_with_browser, save_html, logger
+from scraper import fetch_listing_html, save_html, logger
 
 # Hedef URL
 TARGET_URL = "https://www.sahibinden.com/cep-telefonu"
@@ -45,8 +45,8 @@ def main():
         logger.info(f"\n{'─' * 40}")
         logger.info(f"📡 Döngü #{cycle} başlıyor...")
         
-        # ZenRows ile veri çek
-        html_content = fetch_with_browser(TARGET_URL)
+        # DrissionPage ile veri çek
+        html_content = fetch_listing_html(TARGET_URL)
         
         if html_content:
             # HTML'i kaydet

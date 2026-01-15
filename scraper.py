@@ -1,16 +1,12 @@
 """
 SahibindenSniper - Scraper Module
-Undetected ChromeDriver ile Sahibinden.com'dan veri çekme
+DrissionPage ile Sahibinden.com'dan veri çekme (Cloudflare Bypass)
 """
 
-import random
 import time
 import logging
 
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from DrissionPage import ChromiumPage, ChromiumOptions
 
 # Logger setup with timestamp
 logging.basicConfig(
@@ -21,45 +17,37 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def fetch_with_browser(target_url: str, max_wait: int = 60) -> str | None:
+def fetch_listing_html(url: str, max_wait: int = 60) -> str | None:
     """
-    Undetected ChromeDriver ile hedef URL'den HTML içerik çeker.
+    DrissionPage ile hedef URL'den HTML içerik çeker.
     CAPTCHA çıkarsa kullanıcının çözmesini bekler.
     
     Args:
-        target_url: Çekilecek sayfa URL'si
+        url: Çekilecek sayfa URL'si
         max_wait: CAPTCHA için maksimum bekleme süresi (saniye)
     
     Returns:
         Başarılıysa HTML içerik, değilse None
     """
-    driver = None
+    page = None
     
     try:
-        logger.info(f"🌐 Tarayıcı başlatılıyor...")
+        logger.info(f"🌐 DrissionPage tarayıcısı başlatılıyor...")
         
         # Chrome options
-        options = uc.ChromeOptions()
+        options = ChromiumOptions()
+        options.set_argument('--no-first-run')
+        options.set_argument('--no-default-browser-check')
+        options.set_argument('--disable-infobars')
         
-        # Rastgele pencere boyutu
-        width = random.randint(1200, 1920)
-        height = random.randint(800, 1080)
-        options.add_argument(f"--window-size={width},{height}")
+        # Headless KAPALI - Cloudflare görsel doğrulama isteyebilir
+        # options.headless(True)
         
-        # Headless KAPALI - Sahibinden headless'ı algılıyor
-        # options.add_argument("--headless")
+        # Tarayıcıyı başlat
+        page = ChromiumPage(options)
         
-        # Ek ayarlar
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_argument("--no-first-run")
-        options.add_argument("--no-service-autorun")
-        options.add_argument("--password-store=basic")
-        
-        # Driver başlat
-        driver = uc.Chrome(options=options, use_subprocess=True)
-        
-        logger.info(f"📍 Sayfa yükleniyor: {target_url}")
-        driver.get(target_url)
+        logger.info(f"📍 Sayfa yükleniyor: {url}")
+        page.get(url)
         
         # CAPTCHA kontrolü ve bekleme
         logger.info(f"⏳ Sayfa yükleniyor ve CAPTCHA kontrol ediliyor...")
@@ -68,26 +56,25 @@ def fetch_with_browser(target_url: str, max_wait: int = 60) -> str | None:
         content_loaded = False
         
         while time.time() - start_time < max_wait:
-            # Sayfa HTML'ini kontrol et
-            page_source = driver.page_source
+            html_content = page.html
             
-            # PerimeterX CAPTCHA var mı kontrol et
-            if "px-captcha" in page_source.lower() or "perimeterx" in page_source.lower():
+            # PerimeterX / Cloudflare CAPTCHA kontrolü
+            if "px-captcha" in html_content.lower() or "perimeterx" in html_content.lower() or "turnstile" in html_content.lower():
                 elapsed = int(time.time() - start_time)
                 logger.warning(f"🔒 CAPTCHA tespit edildi! Lütfen tarayıcıda çözün... ({elapsed}s/{max_wait}s)")
                 time.sleep(3)
                 continue
             
-            # Gerçek içerik var mı kontrol et (searchResultsItem)
-            if "searchResultsItem" in page_source or "classifiedTitle" in page_source:
+            # Gerçek içerik kontrolü
+            if "searchResultsItem" in html_content or "classifiedTitle" in html_content:
                 content_loaded = True
                 logger.info(f"✓ Gerçek içerik yüklendi!")
                 break
             
-            # Sahibinden ana sayfa elementleri
-            if "sahibinden" in page_source.lower() and len(page_source) > 50000:
+            # Sahibinden ana içerik kontrolü
+            if len(html_content) > 50000:
                 content_loaded = True
-                logger.info(f"✓ Sayfa yüklendi ({len(page_source)} karakter)")
+                logger.info(f"✓ Sayfa yüklendi ({len(html_content)} karakter)")
                 break
             
             time.sleep(2)
@@ -96,13 +83,11 @@ def fetch_with_browser(target_url: str, max_wait: int = 60) -> str | None:
             logger.error(f"✗ {max_wait} saniye içinde içerik yüklenemedi.")
             return None
         
-        # Ekstra bekleme - sayfanın tam render olması için
-        wait_time = random.uniform(3, 5)
-        logger.info(f"⏳ {wait_time:.1f} saniye ekstra bekleniyor...")
-        time.sleep(wait_time)
+        # Ekstra bekleme
+        time.sleep(3)
         
         # Final HTML al
-        html_content = driver.page_source
+        html_content = page.html
         
         if html_content and len(html_content) > 10000:
             logger.info(f"✓ Başarılı! {len(html_content)} karakter alındı.")
@@ -112,13 +97,13 @@ def fetch_with_browser(target_url: str, max_wait: int = 60) -> str | None:
             return html_content if html_content else None
             
     except Exception as e:
-        logger.error(f"✗ Tarayıcı hatası: {e}")
+        logger.error(f"✗ DrissionPage hatası: {e}")
         return None
         
     finally:
-        if driver:
+        if page:
             try:
-                driver.quit()
+                page.quit()
                 logger.info("🔒 Tarayıcı kapatıldı.")
             except Exception:
                 pass
@@ -148,6 +133,6 @@ def save_html(content: str, filename: str = "sahibinden_raw.html") -> bool:
 if __name__ == "__main__":
     # Test için standalone çalıştırma
     test_url = "https://www.sahibinden.com/cep-telefonu"
-    html = fetch_with_browser(test_url)
+    html = fetch_listing_html(test_url)
     if html:
         save_html(html)
