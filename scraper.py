@@ -1,13 +1,13 @@
 """
 SahibindenSniper - Scraper Module
-DrissionPage + CloudflareBypasser ile Sahibinden.com'dan veri çekme
+DrissionPage + Persistent Profile ile Sahibinden.com'dan veri çekme
 """
 
+import os
 import time
 import logging
 
 from DrissionPage import ChromiumPage, ChromiumOptions
-from cf_bypass import CloudflareBypasser
 
 # Logger setup with timestamp
 logging.basicConfig(
@@ -17,14 +17,39 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Kalıcı profil dizini
+PROFILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "browser_profile")
 
-def fetch_listing_html(url: str, max_retries: int = 10) -> str | None:
+
+def is_captcha_page(page) -> bool:
+    """PerimeterX CAPTCHA sayfası mı kontrol eder"""
+    try:
+        title = page.title.lower() if page.title else ""
+        html = page.html.lower() if page.html else ""
+        
+        captcha_indicators = [
+            "olağan dışı erişim",
+            "unusual access",
+            "px-captcha",
+            "perimeterx",
+            "just a moment"
+        ]
+        
+        for indicator in captcha_indicators:
+            if indicator in title or indicator in html:
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def fetch_listing_html(url: str) -> str | None:
     """
-    DrissionPage + CloudflareBypasser ile hedef URL'den HTML içerik çeker.
+    DrissionPage + Persistent Profile ile hedef URL'den HTML içerik çeker.
+    CAPTCHA çıkarsa kullanıcının manuel çözmesini bekler.
     
     Args:
         url: Çekilecek sayfa URL'si
-        max_retries: Cloudflare bypass için maksimum deneme
     
     Returns:
         Başarılıysa HTML içerik, değilse None
@@ -33,9 +58,11 @@ def fetch_listing_html(url: str, max_retries: int = 10) -> str | None:
     
     try:
         logger.info(f"🌐 DrissionPage tarayıcısı başlatılıyor...")
+        logger.info(f"📁 Profil dizini: {PROFILE_PATH}")
         
-        # Chrome options
+        # Chrome options with persistent profile
         options = ChromiumOptions()
+        options.set_user_data_path(PROFILE_PATH)
         options.set_argument('--no-first-run')
         options.set_argument('--no-default-browser-check')
         options.set_argument('--disable-infobars')
@@ -46,14 +73,28 @@ def fetch_listing_html(url: str, max_retries: int = 10) -> str | None:
         logger.info(f"📍 Sayfa yükleniyor: {url}")
         page.get(url)
         
-        # CloudflareBypasser ile korumayı aş
-        logger.info(f"🔐 Cloudflare bypass başlatılıyor...")
-        bypasser = CloudflareBypasser(driver=page, max_retries=max_retries, log=True)
-        bypass_success = bypasser.bypass()
+        # Sayfa yüklenene kadar kısa bekleme
+        time.sleep(3)
         
-        if not bypass_success:
-            logger.error("✗ Cloudflare bypass başarısız.")
-            return None
+        # CAPTCHA kontrolü
+        if is_captcha_page(page):
+            logger.warning("=" * 60)
+            logger.warning("⚠️  PerimeterX CAPTCHA Tespit Edildi!")
+            logger.warning("=" * 60)
+            logger.warning("👆 Lütfen açılan tarayıcı penceresinde CAPTCHA'yı manuel olarak çözün.")
+            logger.warning("✅ Çözdükten sonra buraya gelip Enter'a basın...")
+            logger.warning("=" * 60)
+            
+            # Kullanıcının Enter'a basmasını bekle
+            input("\n>>> CAPTCHA'yı çözdükten sonra Enter'a basın: ")
+            
+            logger.info("🔄 Sayfa yeniden kontrol ediliyor...")
+            time.sleep(2)
+            
+            # Hâlâ CAPTCHA varsa hata ver
+            if is_captcha_page(page):
+                logger.error("✗ CAPTCHA hâlâ mevcut. Lütfen tekrar deneyin.")
+                return None
         
         # Ekstra bekleme - sayfanın tam render olması için
         time.sleep(3)
@@ -61,12 +102,15 @@ def fetch_listing_html(url: str, max_retries: int = 10) -> str | None:
         # HTML al
         html_content = page.html
         
-        if html_content and len(html_content) > 10000:
+        if html_content and len(html_content) > 50000:
             logger.info(f"✓ Başarılı! {len(html_content)} karakter alındı.")
             return html_content
+        elif html_content and len(html_content) > 10000:
+            logger.warning(f"⚠ Sayfa alındı ama beklenenden kısa: {len(html_content)} karakter")
+            return html_content
         else:
-            logger.warning(f"⚠ Sayfa içeriği beklenenden kısa: {len(html_content) if html_content else 0} karakter")
-            return html_content if html_content else None
+            logger.error(f"✗ Sayfa içeriği çok kısa: {len(html_content) if html_content else 0} karakter")
+            return None
             
     except Exception as e:
         logger.error(f"✗ Scraper hatası: {e}")
