@@ -1,12 +1,13 @@
 """
 SahibindenSniper - Scraper Module
-DrissionPage ile Sahibinden.com'dan veri çekme (Cloudflare Bypass)
+DrissionPage + CloudflareBypasser ile Sahibinden.com'dan veri çekme
 """
 
 import time
 import logging
 
 from DrissionPage import ChromiumPage, ChromiumOptions
+from cf_bypass import CloudflareBypasser
 
 # Logger setup with timestamp
 logging.basicConfig(
@@ -17,14 +18,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def fetch_listing_html(url: str, max_wait: int = 60) -> str | None:
+def fetch_listing_html(url: str, max_retries: int = 10) -> str | None:
     """
-    DrissionPage ile hedef URL'den HTML içerik çeker.
-    CAPTCHA çıkarsa kullanıcının çözmesini bekler.
+    DrissionPage + CloudflareBypasser ile hedef URL'den HTML içerik çeker.
     
     Args:
         url: Çekilecek sayfa URL'si
-        max_wait: CAPTCHA için maksimum bekleme süresi (saniye)
+        max_retries: Cloudflare bypass için maksimum deneme
     
     Returns:
         Başarılıysa HTML içerik, değilse None
@@ -40,64 +40,36 @@ def fetch_listing_html(url: str, max_wait: int = 60) -> str | None:
         options.set_argument('--no-default-browser-check')
         options.set_argument('--disable-infobars')
         
-        # Headless KAPALI - Cloudflare görsel doğrulama isteyebilir
-        # options.headless(True)
-        
         # Tarayıcıyı başlat
         page = ChromiumPage(options)
         
         logger.info(f"📍 Sayfa yükleniyor: {url}")
         page.get(url)
         
-        # CAPTCHA kontrolü ve bekleme
-        logger.info(f"⏳ Sayfa yükleniyor ve CAPTCHA kontrol ediliyor...")
+        # CloudflareBypasser ile korumayı aş
+        logger.info(f"🔐 Cloudflare bypass başlatılıyor...")
+        bypasser = CloudflareBypasser(driver=page, max_retries=max_retries, log=True)
+        bypass_success = bypasser.bypass()
         
-        start_time = time.time()
-        content_loaded = False
-        
-        while time.time() - start_time < max_wait:
-            html_content = page.html
-            
-            # PerimeterX / Cloudflare CAPTCHA kontrolü
-            if "px-captcha" in html_content.lower() or "perimeterx" in html_content.lower() or "turnstile" in html_content.lower():
-                elapsed = int(time.time() - start_time)
-                logger.warning(f"🔒 CAPTCHA tespit edildi! Lütfen tarayıcıda çözün... ({elapsed}s/{max_wait}s)")
-                time.sleep(3)
-                continue
-            
-            # Gerçek içerik kontrolü
-            if "searchResultsItem" in html_content or "classifiedTitle" in html_content:
-                content_loaded = True
-                logger.info(f"✓ Gerçek içerik yüklendi!")
-                break
-            
-            # Sahibinden ana içerik kontrolü
-            if len(html_content) > 50000:
-                content_loaded = True
-                logger.info(f"✓ Sayfa yüklendi ({len(html_content)} karakter)")
-                break
-            
-            time.sleep(2)
-        
-        if not content_loaded:
-            logger.error(f"✗ {max_wait} saniye içinde içerik yüklenemedi.")
+        if not bypass_success:
+            logger.error("✗ Cloudflare bypass başarısız.")
             return None
         
-        # Ekstra bekleme
+        # Ekstra bekleme - sayfanın tam render olması için
         time.sleep(3)
         
-        # Final HTML al
+        # HTML al
         html_content = page.html
         
         if html_content and len(html_content) > 10000:
             logger.info(f"✓ Başarılı! {len(html_content)} karakter alındı.")
             return html_content
         else:
-            logger.warning(f"⚠ Sayfa içeriği beklenenden kısa: {len(html_content)} karakter")
+            logger.warning(f"⚠ Sayfa içeriği beklenenden kısa: {len(html_content) if html_content else 0} karakter")
             return html_content if html_content else None
             
     except Exception as e:
-        logger.error(f"✗ DrissionPage hatası: {e}")
+        logger.error(f"✗ Scraper hatası: {e}")
         return None
         
     finally:
